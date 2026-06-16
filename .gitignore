@@ -1,0 +1,16 @@
+# Python build artifacts
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+
+# Secrets — never commit
+.env
+keys/
+*.pem
