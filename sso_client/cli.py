@@ -37,6 +37,35 @@ def _generate_keypair() -> tuple[str, str]:
     return private_pem, public_pem
 
 
+BEGIN_MARK = "# >>> sso-client init >>>"
+END_MARK = "# <<< sso-client init <<<"
+
+
+def _write_env_block(env_path: pathlib.Path, block: str) -> str:
+    """Add/refresh the SSO block WITHOUT destroying an existing .env.
+
+    The block is delimited by markers, so re-running init replaces only our
+    section and leaves every other variable in the file untouched.
+    """
+    new_block = f"{BEGIN_MARK}\n{block.strip()}\n{END_MARK}\n"
+
+    if not env_path.exists():
+        env_path.write_text(new_block, encoding="utf-8")
+        return "created"
+
+    existing = env_path.read_text(encoding="utf-8")
+    if BEGIN_MARK in existing and END_MARK in existing:
+        head, rest = existing.split(BEGIN_MARK, 1)
+        _, tail = rest.split(END_MARK, 1)
+        updated = head.rstrip("\n") + "\n\n" + new_block + tail.lstrip("\n")
+        env_path.write_text(updated, encoding="utf-8")
+        return "updated existing SSO block in"
+
+    updated = existing.rstrip("\n") + "\n\n" + new_block
+    env_path.write_text(updated, encoding="utf-8")
+    return "appended SSO block to"
+
+
 def _render_env(client_id: str, redirect_uri: str, cfg: dict, key_path: str,
                 orch_pub_path: str, dashboard_url: str) -> str:
     # Cookie flags follow the redirect scheme: https -> Secure+None (prod),
@@ -120,17 +149,17 @@ def cmd_init(args: argparse.Namespace) -> None:
         orch_pub_path = "./" + orch_path.as_posix().lstrip("./")
 
     env_key_path = "./" + private_path.as_posix().lstrip("./")
-    pathlib.Path(args.env_file).write_text(
+    env_action = _write_env_block(
+        pathlib.Path(args.env_file),
         _render_env(args.client_id, redirect_uri, cfg, env_key_path, orch_pub_path,
                     args.dashboard_url),
-        encoding="utf-8",
     )
 
     print(f"  generated {private_path}  (keep secret — gitignore it)")
     print(f"  generated {public_path}")
     if orch_pub_path:
         print(f"  generated {keys_dir / 'orchestrator_public.pem'}")
-    print(f"  wrote     {args.env_file}")
+    print(f"  {env_action} {args.env_file}")
 
     # Register the PUBLIC key with the orchestrator, or print it for the UI.
     base = config_uri.rsplit("/sso/config", 1)[0]
