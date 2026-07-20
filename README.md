@@ -23,8 +23,10 @@ and the orchestrator endpoints — all delivered in the **integration packet** t
 ## Onboard a project (3 steps)
 
 ```bash
-# 1. install
-pip install sso-client
+# 1. install (from git — not on PyPI)
+pip install "git+https://github.com/alokydvKE/SSO_SDK.git@main"
+# private repo? use an SSH deploy key:
+#   pip install "git+ssh://git@github.com/alokydvKE/SSO_SDK.git@main"
 
 # 2. generate keys locally + write .env + register the PUBLIC key.
 #    The PRIVATE key never leaves your machine.
