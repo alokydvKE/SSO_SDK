@@ -87,6 +87,13 @@ def _render_env(client_id: str, redirect_uri: str, cfg: dict, key_path: str,
     if orch_pub_path:
         # Lets from_env() power verify_access_token offline (no discovery call).
         lines.append(f"SSO_ORCHESTRATOR_PUBLIC_KEY_PATH={orch_pub_path}")
+    if cfg.get("launch_endpoint") and cfg.get("redeem_endpoint"):
+        # Cookie-free app launch (LaunchClient.from_env()).
+        lines += [
+            f"SSO_LAUNCH_ENDPOINT={cfg['launch_endpoint']}",
+            f"SSO_REDEEM_ENDPOINT={cfg['redeem_endpoint']}",
+            f"SSO_ORCHESTRATOR_ISSUER={cfg.get('identity_token_issuer', 'orchestrator')}",
+        ]
 
     lines += [
         "",

@@ -10,12 +10,23 @@ no cookie-flag handling to get wrong.
 """
 from __future__ import annotations
 
+from typing import Any, Callable
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
 from starlette import status
 
 from . import core
 from .config import SSOClientConfig
+from .launch import (
+    Identity,
+    InvalidLaunchCode,
+    LaunchClient,
+    LaunchConfigError,
+    LaunchRejected,
+    OrchestratorUnavailable,
+)
 
 
 def create_sso_router(config: SSOClientConfig, *, prefix: str = "") -> APIRouter:
@@ -68,5 +79,43 @@ def create_sso_router(config: SSOClientConfig, *, prefix: str = "") -> APIRouter
         )
         response.delete_cookie(config.state_cookie_name, path="/")
         return response
+
+    return router
+
+
+class RedeemCodeBody(BaseModel):
+    """Body your landing page POSTs to the redeem endpoint."""
+    code: str = Field(min_length=1, max_length=256)
+
+
+def create_launch_redeem_router(
+    client: "LaunchClient",
+    on_login: Callable[[Identity, Request], Any],
+    *,
+    path: str = "/sso/redeem",
+    prefix: str = "",
+) -> APIRouter:
+    """Target side of the cookie-free app launch, as one POST endpoint.
+
+    Your landing page reads the code from the URL fragment and POSTs
+    {"code": "..."} here. The SDK redeems it and verifies the identity; you only
+    write `on_login(identity, request)`, which signs `identity.email` in with
+    your app's normal session and returns whatever your login endpoint returns.
+    """
+    router = APIRouter(prefix=prefix)
+
+    @router.post(path)
+    def redeem_launch_code(body: RedeemCodeBody, request: Request):
+        try:
+            identity = client.redeem(body.code)
+        except InvalidLaunchCode as exc:
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message})
+        except OrchestratorUnavailable as exc:
+            raise HTTPException(status_code=503, detail={"code": exc.code, "message": "Sign-in is temporarily unavailable"})
+        except LaunchConfigError as exc:
+            raise HTTPException(status_code=503, detail={"code": exc.code, "message": "SSO is not configured on this server"})
+        except LaunchRejected as exc:
+            raise HTTPException(status_code=401, detail={"code": exc.code, "message": exc.message})
+        return on_login(identity, request)
 
     return router
