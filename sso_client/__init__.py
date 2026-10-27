@@ -1,9 +1,16 @@
 """sso-client: drop-in SSO integration for orchestrator client projects.
 
-Cookie-free app launch (recommended):
+Cookie-free app launch (recommended). After `sso-client setup`, in a FastAPI app:
 
-    from sso_client import LaunchClient
+    from sso_client import add_sso
 
+    add_sso(app, on_login=login_by_email, current_user_email=get_user_email)
+
+Any other Python app:
+
+    from sso_client import LaunchClient, load_env_file
+
+    load_env_file()                     # SSO_* lines of ./.env
     sso = LaunchClient.from_env()
     url = sso.launch_url(target="insignai", email=user_email, context={...})  # source app
     identity = sso.redeem(code)                                               # target app
@@ -32,12 +39,14 @@ from .launch import (
     LaunchRejected,
     LaunchResult,
     OrchestratorUnavailable,
+    load_env_file,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     # cookie-free app launch
+    "add_sso",
     "LaunchClient",
     "LaunchResult",
     "Identity",
@@ -46,7 +55,9 @@ __all__ = [
     "LaunchRejected",
     "InvalidLaunchCode",
     "OrchestratorUnavailable",
+    "load_env_file",
     "create_launch_redeem_router",
+    "create_launch_router",
     # legacy cookie redirect flow
     "SSOClientConfig",
     "create_sso_router",
@@ -61,7 +72,7 @@ __all__ = [
 def __getattr__(name):
     # The FastAPI helpers are imported lazily so the launch client works in
     # apps that don't use FastAPI.
-    if name in ("create_sso_router", "create_launch_redeem_router"):
+    if name in ("add_sso", "create_sso_router", "create_launch_redeem_router", "create_launch_router"):
         from . import fastapi_router
         return getattr(fastapi_router, name)
     raise AttributeError(f"module 'sso_client' has no attribute {name!r}")

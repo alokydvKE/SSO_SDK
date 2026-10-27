@@ -12,17 +12,79 @@ target app BE --POST /sso/redeem {assertion, code}--> orchestrator --> identity 
 target app signs the email in with its own normal session
 ```
 
-### Add an app in four steps
+### Add a FastAPI app
 
-1. **Register** it in the orchestrator dashboard and run `sso-client init` to
-   create its key pair and `.env`. As a target, set its **landing URL** and the
-   apps allowed to launch into it (`PUT /projects/{client_id}/launch-settings`).
-   The SSO portal can always launch into an app that has a landing URL.
-2. **As a source**, add one endpoint behind your normal login:
+1. **Install** (from git; pin a tag):
+
+   ```bash
+   pip install "sso-client[fastapi] @ git+https://github.com/alokydvKE/SSO_SDK.git@v0.3.0"
+   ```
+
+2. **Onboard** with one command, run in your backend folder. It asks for an
+   orchestrator admin's password, registers the project (if new), creates a key
+   pair locally and registers only its public key, sets the landing URL
+   (`<app-url>/sso`) and writes the SSO block of `.env`. Re-running it is safe:
+   it reuses the key and keeps the allowed sources unless you pass new ones.
+
+   ```bash
+   sso-client setup --client-id my_app --name "My App" \
+     --app-url https://my-app.example.com \
+     --orchestrator https://<orchestrator host>/auth_orchestrator
+   ```
+
+   Options: `--allowed-sources persona_ai,insignai` (apps that may open yours;
+   the SSO portal always may), `--landing-path '#/sso'` for hash-routed
+   frontends, `--admin-user`, `--rotate-key`. Keep `keys/` and `.env` out of git.
+
+3. **Backend**: one call. You write the two parts only your app knows: how to
+   sign a user in by email, and who the current user is.
 
    ```python
-   from sso_client import LaunchClient, LaunchError
+   from sso_client import add_sso
 
+   def login_by_email(identity, request):         # identity.email / .source / .context
+       return issue_normal_session(identity.email)  # your code; same response as your /login
+
+   def get_user_email(user=Depends(current_user)):  # your auth dependency
+       return user.email
+
+   add_sso(app, on_login=login_by_email, current_user_email=get_user_email, prefix="/api")
+   # POST /api/sso/redeem  {code}                 -> on_login(...)  (other apps open yours)
+   # POST /api/sso/launch  {target, context?}     -> {launch_url}   (yours opens others)
+   ```
+
+   Leave out `current_user_email` if the app only receives users. `add_sso`
+   reads the `SSO_*` lines of `./.env` itself (`env_file=` to change).
+
+4. **Frontend**: a landing page at the landing URL, and, as a source, a button.
+
+   ```js
+   // landing page (/sso): the code is in the # fragment, never sent to a server
+   const code = new URLSearchParams(location.hash.slice(1)).get("code");  // hash routing: location.hash.split("?")[1]
+   history.replaceState(null, "", location.pathname);                      // remove it from the address bar
+   const session = await post("/api/sso/redeem", { code });                // your API helper
+   // store the session exactly as after a password login, then go to the home page
+
+   // "Open Persona AI" button: open the tab inside the click handler (popup blockers allow that)
+   const tab = window.open("about:blank", "_blank");
+   const { launch_url } = await post("/api/sso/launch", { target: "persona_ai" });
+   tab.opener = null;
+   tab.location.replace(launch_url);
+   ```
+
+5. **Test**: open the app from the portal and land signed in; opening the same
+   link again must fail.
+
+### Without FastAPI
+
+`sso-client setup` works for any app. Then, in Python, call the client directly:
+
+1. **As a source**, add one endpoint behind your normal login:
+
+   ```python
+   from sso_client import LaunchClient, LaunchError, load_env_file
+
+   load_env_file()                        # SSO_* lines of ./.env
    sso = LaunchClient.from_env()          # or LaunchClient.from_settings(...)
    url = sso.launch_url(target="insignai", email=current_user.email,
                         context={"action": "optibot_prompt", "prompt": "..."})
@@ -39,29 +101,30 @@ target app signs the email in with its own normal session
    tab.location.replace(launch_url);
    ```
 
-3. **As a target**, add a public endpoint that redeems the code and signs the
+2. **As a target**, add a public endpoint that redeems the code and signs the
    email in with your existing login code:
 
    ```python
-   from sso_client import InvalidLaunchCode, LaunchClient
-   from sso_client.fastapi_router import create_launch_redeem_router
+   from sso_client import InvalidLaunchCode
 
-   sso = LaunchClient.from_env()
-
-   def login_by_email(identity, request):
-       user = users.find_active_by_email(identity.email)   # your code
-       return issue_normal_session(user)                   # your code
-
-   app.include_router(create_launch_redeem_router(sso, login_by_email))  # POST /sso/redeem
+   def sso_redeem(code):                                    # POST /sso/redeem {code}
+       try:
+           identity = sso.redeem(code)                      # identity.email / .source / .context
+       except InvalidLaunchCode:
+           return error(400, "This link has expired. Go back and click again.")
+       user = users.find_active_by_email(identity.email)    # your code
+       return issue_normal_session(user)                    # your code
    ```
 
    Your landing page reads `code` from the URL fragment, removes it from the
    address bar (`history.replaceState`), and POSTs `{"code": ...}` to that
    endpoint.
-4. **Test**: launch, land signed in, and check that opening the same link again
+3. **Test**: launch, land signed in, and check that opening the same link again
    fails.
 
 ### Environment
+
+`sso-client setup` writes these to `.env`; `add_sso()` and `load_env_file()` read them.
 
 | Variable | Needed by |
 |---|---|

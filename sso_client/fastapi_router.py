@@ -1,6 +1,10 @@
-"""Ready-made FastAPI router implementing the client half of the SSO flow.
+"""Ready-made FastAPI routers.
 
-Mounting this gives a project the two endpoints it would otherwise hand-code:
+App launch: `add_sso(app, on_login=..., current_user_email=...)` mounts
+POST /sso/redeem and POST /sso/launch in one call.
+
+Legacy cookie flow: mounting create_sso_router gives a project the two
+endpoints it would otherwise hand-code:
 
     GET /auth/sso/start        (step 2)  -> set state cookie, redirect to authorize
     GET /projects/callback     (steps 6-9) -> CSRF check, assertion, exchange, session
@@ -10,9 +14,9 @@ no cookie-flag handling to get wrong.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from starlette import status
@@ -26,6 +30,7 @@ from .launch import (
     LaunchConfigError,
     LaunchRejected,
     OrchestratorUnavailable,
+    load_env_file,
 )
 
 
@@ -119,3 +124,71 @@ def create_launch_redeem_router(
         return on_login(identity, request)
 
     return router
+
+
+class LaunchAppBody(BaseModel):
+    """Body your frontend POSTs to open another app."""
+    target: str = Field(min_length=1, max_length=100)
+    context: Optional[Dict[str, Any]] = None
+
+
+def create_launch_router(
+    client: "LaunchClient",
+    current_user_email: Callable[..., str],
+    *,
+    path: str = "/sso/launch",
+    prefix: str = "",
+) -> APIRouter:
+    """Source side of the cookie-free app launch, as one POST endpoint.
+
+    Your frontend POSTs {"target": "<client_id>", "context": {...}} and opens
+    the returned launch_url in a new tab. `current_user_email` is a FastAPI
+    dependency that returns the signed-in user's email and rejects anonymous
+    callers, like your other protected routes do.
+    """
+    router = APIRouter(prefix=prefix)
+
+    @router.post(path)
+    def launch_app(body: LaunchAppBody, email: str = Depends(current_user_email)):
+        try:
+            result = client.create_launch(body.target, email, body.context)
+        except OrchestratorUnavailable as exc:
+            raise HTTPException(status_code=503, detail={"code": exc.code, "message": "Sign-in is temporarily unavailable"})
+        except LaunchConfigError as exc:
+            raise HTTPException(status_code=503, detail={"code": exc.code, "message": "SSO is not configured on this server"})
+        except LaunchRejected as exc:
+            # The orchestrator refused (e.g. this app isn't an allowed source).
+            # Not 401: the user's own session is fine.
+            raise HTTPException(status_code=502, detail={"code": exc.code, "message": exc.message})
+        return {"launch_url": result.launch_url, "expires_in": result.expires_in}
+
+    return router
+
+
+def add_sso(
+    app: Any,
+    on_login: Optional[Callable[[Identity, Request], Any]] = None,
+    *,
+    current_user_email: Optional[Callable[..., str]] = None,
+    prefix: str = "",
+    env_file: str = ".env",
+    client: Optional[LaunchClient] = None,
+) -> LaunchClient:
+    """Everything a FastAPI app needs for app launch, in one call.
+
+    Reads the SSO_* settings `sso-client setup` wrote to `env_file`, then mounts
+      POST {prefix}/sso/redeem  if `on_login` is given: other apps can open this one
+      POST {prefix}/sso/launch  if `current_user_email` is given: this app can open others
+    and returns the LaunchClient, for calling launch_url() yourself.
+    `app` is your FastAPI app or an APIRouter.
+    """
+    if on_login is None and current_user_email is None:
+        raise TypeError("add_sso() needs on_login, current_user_email, or both")
+    if client is None:
+        load_env_file(env_file)
+        client = LaunchClient.from_env()
+    if on_login is not None:
+        app.include_router(create_launch_redeem_router(client, on_login, prefix=prefix))
+    if current_user_email is not None:
+        app.include_router(create_launch_router(client, current_user_email, prefix=prefix))
+    return client
