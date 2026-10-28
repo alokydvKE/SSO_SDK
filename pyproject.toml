@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sso-client"
-version = "0.3.0"
-description = "Drop-in SSO integration for orchestrator client projects"
+version = "0.4.0"
+description = "App launch SSO (cookie-free, server to server) for orchestrator client apps"
 requires-python = ">=3.8"
 dependencies = [
     "PyJWT>=2.6",
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Only needed for the ready-made routers (create_sso_router, create_launch_redeem_router).
+# Only needed for the ready-made routers (add_sso, create_launch_redeem_router, create_launch_router).
 fastapi = ["fastapi>=0.100"]
 
 [project.scripts]
