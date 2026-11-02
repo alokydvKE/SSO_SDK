@@ -36,6 +36,11 @@ target app signs the email in with its own normal session
    the SSO portal always may), `--landing-path '#/sso'` for hash-routed
    frontends, `--admin-user`, `--rotate-key`. Keep `keys/` and `.env` out of git.
 
+   The private key goes in `keys/` by default. Add `--key-in-env` to keep it in
+   `.env` as `SSO_CLIENT_PRIVATE_KEY` instead, with no keys folder. This suits
+   hosts that take settings as variables. Re-running reuses the key from either
+   place, so you can switch between them without changing it.
+
 3. **Backend**: one call. You write the two parts only your app knows: how to
    sign a user in by email, and who the current user is.
 
@@ -133,6 +138,9 @@ target app signs the email in with its own normal session
 | `SSO_LAUNCH_ENDPOINT`, `SSO_REDEEM_ENDPOINT` (or `SSO_ORCHESTRATOR_URL`) | source / target |
 | `SSO_ORCHESTRATOR_PUBLIC_KEY_PATH` (or `SSO_ORCHESTRATOR_PUBLIC_KEY`) | target |
 | `SSO_ORCHESTRATOR_ISSUER`, `SSO_AUDIENCE`, `SSO_HTTP_TIMEOUT_SECONDS` | optional |
+
+With `--key-in-env`, setup writes `SSO_CLIENT_PRIVATE_KEY` and neither `_PATH`
+value. The SDK then fetches the orchestrator's public key from `SSO_CONFIG_URI`.
 
 ### Errors
 

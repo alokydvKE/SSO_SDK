@@ -87,6 +87,22 @@ class OrchestratorUnavailable(LaunchError):
 # Settings file
 # =============================================================================
 
+def _env_file_values(env_path: pathlib.Path) -> Dict[str, str]:
+    """The SSO_* settings of a .env file, with surrounding quotes removed."""
+    values: Dict[str, str] = {}
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        if not line.startswith("SSO_") or "=" not in line:
+            continue
+        key, value = (part.strip() for part in line.split("=", 1))
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        values.setdefault(key, value)
+    return values
+
+
 def load_env_file(path: str = ".env") -> bool:
     """Put the SSO_* lines of a .env file (as written by `sso-client setup`) into
     os.environ, without overriding variables that are already set.
@@ -97,15 +113,7 @@ def load_env_file(path: str = ".env") -> bool:
     env_path = pathlib.Path(path).expanduser()
     if not env_path.is_file():
         return False
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line.startswith("export "):
-            line = line[len("export "):].lstrip()
-        if not line.startswith("SSO_") or "=" not in line:
-            continue
-        key, value = (part.strip() for part in line.split("=", 1))
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
+    for key, value in _env_file_values(env_path).items():
         if key.endswith("_PATH") and value and not pathlib.Path(value).expanduser().is_absolute():
             value = str((env_path.parent / value).resolve())
         os.environ.setdefault(key, value)
